@@ -23,3 +23,6 @@ This repository contains **stubs** for the H-UDP project. All core methods raise
 - `hudp/metrics.py` — metrics recorder for PDR/latency/jitter/throughput
 - `sender.py` and `receiver.py` — demo apps
 - `plot_metrics.py` — simple plotting of CSV metrics
+
+### Acknowledgements
+- AI was used to generate the bare bones file with notImplementedErrors to provide a collaborative space for team work on functional obligation and integration
