@@ -2,9 +2,6 @@ We implement reliability with a Selective Repeat (SR) sender and a Go-Back-N (GB
 
 On the receiving side, we enforce strict in-order delivery to the application using a GBN ordering policy while still accepting out-of-order arrivals at the transport layer. Concretely, every reliable packet is ACKed immediately upon receipt (to keep the sender informed), and packets that arrive ahead of the next expected sequence are buffered (SR capability). Delivery to the app only proceeds at the head of the stream. To prevent head-of-line stalls in real-time scenarios, we implement the assignment’s skip-after-t rule: if a gap persists for ≥ t ms (default 200 ms), we skip the missing sequence number, advance the expected pointer, and immediately drain any buffered packets that now become in-order. A lightweight background timer enforces this policy even if no further traffic arrives.
 
-Sure — let’s break that paragraph down clearly and intuitively:
-
----
 
 ### 1️⃣ **What the problem is**
 
