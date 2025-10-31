@@ -25,7 +25,6 @@ This repository contains **stubs** for the H-UDP project. All core methods raise
 - `plot_metrics.py` — simple plotting of CSV metrics
 
 ### Acknowledgements
-- AI was used to generate the bare bones file with notImplementedErrors to provide a collaborative space for team work on functional obligation and integration
-
+- AI was used to generate code for the files, we adapt changes to it for our project. It also helps us to learn some optimal tricks compared to the vanilla mechanism. For example for reliable we chose selective repeat since go-back-n often has throttled performance. This help us evaluate tradeoff and implement some knonwn optimisation. Refer to hudp/reliable.md
 ### Team Photo
   ![Team Photo](https://github.com/user-attachments/assets/58445cec-9b95-43c3-baeb-ab0d0385c937)
