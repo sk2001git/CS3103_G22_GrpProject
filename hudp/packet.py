@@ -22,8 +22,8 @@ class PacketHeader:
     | ChannelType (1 B) | SeqNo (2 B) | Timestamp (4 B) | => 7 bytes
     """
     channel_type: int
-    seq: int
-    ts_ms: int
+    seq_num: int
+    timestamp_ms: int
 
 def now_ms() -> int:
     """Return current time in milliseconds (uint32 wrap is fine)."""
