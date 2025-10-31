@@ -41,15 +41,36 @@ class GameNetAPI:
         self.emulator = None
         self.RETRANSMIT_TIMEOUT_MS = 100
         self.SKIP_THRESHOLD_MS = skip_threshold_ms
+        
+        self._rx_ts = {}  # seq -> header.timestamp_ms for reliable delivery
+        self.sr_sender = SRSender(
+            window_size=64,
+            rto_ms=200,
+            max_retries=10,
+            on_send_raw=self._sr_on_send_raw,  # wrap + send reliable
+            on_drop=self._sr_on_drop,
+            on_rtt=self._sr_on_rtt,
+            clock_ms=lambda: int(time.time() * 1000),
+        )
+        self.sr_receiver = SRReceiver(
+            deliver_in_order=self._sr_deliver_in_order,
+            send_ack=self._sr_send_ack,        # emit ACKs
+            skip_threshold_ms=skip_threshold_ms,
+            clock_ms=lambda: int(time.time() * 1000),
+            window_size=64,
+        )
 
     def start(self):
         self.running = True
+        self.sr_sender.start()               # start SR timers
         self._recv_thread.start()
         self._retransmission_thread.start()
 
     def stop(self):
         self.running = False
         self.sock.close()
+        self.sr_receiver.stop()
+        self.sr_sender.stop()
         self._recv_thread.join()
         self._retransmission_thread.join()
 
@@ -95,6 +116,36 @@ class GameNetAPI:
             self.emulator.send_emulated(self.sock, self.peer_addr, data)
         else:
             self.sock.sendto(data, self.peer_addr)
+            
+
+    def _sr_on_send_raw(self, seq: int, payload: bytes) -> None:
+        """Wrap reliable payload with your header and send."""
+        if not self.peer_addr:
+            return
+        hdr = pack_header(RELIABLE, seq)
+        self._send_internal(hdr + payload)
+
+    def _sr_send_ack(self, ack_seq: int) -> None:
+        """Emit per-packet ACK (unchanged wire format)."""
+        if not self.peer_addr:
+            return
+        ack_packet = pack_ack(ack_seq)
+        self._send_internal(ack_packet)
+
+    def _sr_deliver_in_order(self, seq: int, payload: bytes) -> None:
+        """Deliver in-order to app; include the original header timestamp if we saw it."""
+        ts = self._rx_ts.pop(seq, now_ms())
+        self.recv_queue.append((RELIABLE, seq, ts, payload))
+        
+    def _sr_on_drop(self, seq: int) -> None:
+        # Optional: surface to app/log
+        # print(f"[RELIABLE] drop seq={seq} after max retries")
+        pass
+
+    def _sr_on_rtt(self, seq: int, rtt_ms: int) -> None:
+        # Hook for metrics if desired
+        pass
+    
 
     def _recv_loop(self):
         while self.running:
@@ -112,53 +163,21 @@ class GameNetAPI:
                     if header.channel_type == UNRELIABLE:
                         self.recv_queue.append((UNRELIABLE, header.seq_num, header.timestamp_ms, payload))
                     elif header.channel_type == RELIABLE:
-                        self._handle_reliable(header, payload)
+                        self._rx_ts[header.seq_num] = header.timestamp_ms
+                        # Hand to SRReceiver: it will ACK immediately and deliver in-order via callback
+                        self.sr_receiver.on_data(header.seq_num, payload)
+                        
             except (socket.error, OSError):
                 break
 
     def _handle_ack(self, data: bytes):
         ack_seq = unpack_ack(data)
-        if ack_seq in self._unacked_packets:
-            # print(f"DEBUG: Received ACK for {ack_seq}")
-            del self._unacked_packets[ack_seq]
-
-    def _handle_reliable(self, header, payload):
-        ack_packet = pack_ack(header.seq_num)
-        self._send_internal(ack_packet)
-
-        if header.seq_num == self._next_expected_seq:
-            self.recv_queue.append((RELIABLE, header.seq_num, header.timestamp_ms, payload))
-            self._next_expected_seq += 1
-            self._process_recv_buffer() # Check buffer for subsequent packets
-        elif header.seq_num > self._next_expected_seq: # Out-of-order packet
-            self._recv_buffer[header.seq_num] = (header, payload, now_ms())
-        else: # Duplicate or old packet, ignore
-            pass
-    def _process_recv_buffer(self):
-        while self._next_expected_seq in self._recv_buffer:
-            header, payload, _ = self._recv_buffer.pop(self._next_expected_seq)
-            self.recv_queue.append((RELIABLE, header.seq_num, header.timestamp_ms, payload))
-            self._next_expected_seq += 1
+        self.sr_sender.ack(ack_seq)
 
     def _retransmission_loop(self):
+        """Minimal-change retention of your thread: SR manages timers, so we idle here."""
         while self.running:
-            now = now_ms()
-
-            for seq, (data, send_time, retries) in list(self._unacked_packets.items()):
-                if now - send_time > self.RETRANSMIT_TIMEOUT_MS:
-                    print(f"INFO: Retransmitting reliable packet {seq} (retry #{retries + 1})")
-                    self._send_internal(data)
-                    self._unacked_packets[seq] = (data, now, retries + 1)
-
-            # skip packets on receiver side
-            if self._recv_buffer:
-                hole_seq = self._next_expected_seq
-                first_buffered_seq = min(self._recv_buffer.keys())
-                if hole_seq < first_buffered_seq:
-                    _, _, buffer_time = self._recv_buffer[first_buffered_seq]
-                    if now - buffer_time > self.SKIP_THRESHOLD_MS:
-                        print(f"WARN: Skipping packet {hole_seq} due to timeout (t={self.SKIP_THRESHOLD_MS}ms).")
-                        self._next_expected_seq = first_buffered_seq
-                        self._process_recv_buffer()
-
+            # No manual retransmit/skip needed; SR handles both.
             time.sleep(0.01)
+
+   
