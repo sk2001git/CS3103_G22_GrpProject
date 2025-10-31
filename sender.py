@@ -5,10 +5,10 @@ import argparse
 import time
 import random
 
-# from hudp.game_net_api import GameNetAPI
-# from hudp.packet import RELIABLE, UNRELIABLE, now_ms
-# from hudp.emulator import UDPEngineEmulator
-# from hudp.metrics import MetricsRecorder
+from hudp.game_net_api import GameNetAPI
+from hudp.packet import RELIABLE, UNRELIABLE, now_ms
+from hudp.emulator import UDPEngineEmulator
+from hudp.metrics import MetricsRecorder
 
 def main():
     parser = argparse.ArgumentParser(description="H-UDP Sender (stub)")
@@ -22,14 +22,50 @@ def main():
     parser.add_argument("--metrics", default="metrics_sender.csv", help="Output CSV for metrics")
     args = parser.parse_args()
 
-    # TODO:
-    # 1) Construct GameNetAPI(), set_peer((args.server, args.port)), optionally attach UDPEngineEmulator.
-    # 2) Start API. Create MetricsRecorder. Ensure channel stats for reliable/unreliable (0/1).
-    # 3) Loop until duration: send payloads at target PPS, randomly mark reliable/unreliable,
-    #    and record mr.on_sent(channel, nbytes).
-    # 4) Optionally drain recv() for any app-level acks or messages you want to track.
-    # 5) Stop API; export metrics to args.metrics.
-    raise NotImplementedError("sender.main: implement send loop, metrics, and cleanup")
+    api = GameNetAPI()
+    api.set_peer((args.server, args.port))
+
+    if args.loss > 0 or args.delay > 0 or args.jitter > 0:
+        print(f"Attaching emulator: loss={args.loss}, delay={args.delay}, jitter={args.jitter}")
+        emulator = UDPEngineEmulator(
+            loss=args.loss,
+            delay_ms=args.delay,
+            jitter_ms=args.jitter
+        )
+        api.attach_emulator(emulator)
+
+    api.start()
+    mr = MetricsRecorder()
+    print(f"Sending {args.pps} packets/sec for {args.duration} seconds to {args.server}:{args.port}")
+
+    start_time = time.time()
+    packet_count = 0
+    try:
+        while time.time() - start_time < args.duration:
+            is_reliable = random.random() < 0.2 # simulate that 20% of packets are reliable
+            channel = RELIABLE if is_reliable else UNRELIABLE
+
+            payload = f"packet_{packet_count}".encode('utf-8')
+
+            num_bytes = api.send(payload, reliable=is_reliable)
+            mr.on_sent(channel, num_bytes)
+
+            packet_count += 1
+            time.sleep(1.0 / args.pps)
+
+    except KeyboardInterrupt:
+        print("\nSender shutting down.")
+    finally:
+        print("Stopping API and generating report...")
+        api.stop()
+
+        summary = mr.get_summary()
+        print("\n--- Sender Summary ---")
+        for ch, stats in summary.items():
+            ch_name = "Reliable" if ch == RELIABLE else "Unreliable"
+            print(f"  Channel {ch} ({ch_name}):")
+            print(f"    Packets Sent: {stats['packets_sent']}")
+        print("----------------------\n")
 
 if __name__ == "__main__":
     main()
