@@ -26,3 +26,6 @@ This repository contains **stubs** for the H-UDP project. All core methods raise
 
 ### Acknowledgements
 - AI was used to generate the bare bones file with notImplementedErrors to provide a collaborative space for team work on functional obligation and integration
+
+### Team Photo
+  ![Team Photo](https://github.com/user-attachments/assets/58445cec-9b95-43c3-baeb-ab0d0385c937)
