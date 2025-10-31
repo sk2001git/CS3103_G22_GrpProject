@@ -127,7 +127,7 @@ class GameNetAPI:
         self._send_internal(ack_packet)
 
         if header.seq_num == self._next_expected_seq:
-            self.recv_queue.append((RELIABLE, header.seq_num, header.timestamp, payload))
+            self.recv_queue.append((RELIABLE, header.seq_num, header.timestamp_ms, payload))
             self._next_expected_seq += 1
             self._process_recv_buffer() # Check buffer for subsequent packets
         elif header.seq_num > self._next_expected_seq: # Out-of-order packet
@@ -137,7 +137,7 @@ class GameNetAPI:
     def _process_recv_buffer(self):
         while self._next_expected_seq in self._recv_buffer:
             header, payload, _ = self._recv_buffer.pop(self._next_expected_seq)
-            self.recv_queue.append((RELIABLE, header.seq_num, header.timestamp, payload))
+            self.recv_queue.append((RELIABLE, header.seq_num, header.timestamp_ms, payload))
             self._next_expected_seq += 1
 
     def _retransmission_loop(self):

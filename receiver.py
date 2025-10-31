@@ -22,7 +22,7 @@ def main():
     try:
         while True:
             channel, seq_num, ts, payload = api.recv(block=True)
-            mr.on_recv(channel, len(payload) + 7, ts)  # 7 bytes for header
+            mr.on_recv(channel, len(payload) + 7, 0, ts)  # 7 bytes for header
             ch_type = "RELIABLE" if channel == RELIABLE else "UNRELIABLE"
             latency = now_ms() - ts
             print(f"[{ch_type}] Seq: {seq_num}, Latency: {latency}ms, Payload: {payload.decode('utf-8')}")
