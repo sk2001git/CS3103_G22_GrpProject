@@ -71,8 +71,8 @@ class GameNetAPI:
         self.sock.close()
         self.sr_receiver.stop()
         self.sr_sender.stop()
-        self._recv_thread.join()
-        self._retransmission_thread.join()
+        self._recv_thread.join(timeout=2)
+        self._retransmission_thread.join(timeout=2)
 
     def set_peer(self, addr):
         self.peer_addr = addr

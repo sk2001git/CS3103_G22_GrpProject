@@ -9,6 +9,11 @@ This repository contains **stubs** for the H-UDP project. All core methods raise
 - Python 3.10+
 - `pip install -r requirements.txt`
 
+- If running scripts:
+  - `python -m venv venv`
+  - `cd scripts`
+  - `chmod +x <script_name>`
+  - `./<script_name>`
 
 ## Run (after implementation)
 - Receiver: `python receiver.py --bind 127.0.0.1 --port 50000`
