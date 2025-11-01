@@ -24,6 +24,6 @@ This repository contains our work for assignment 4, coded, directed, solved, by 
 - `plot_metrics.py` — simple plotting of CSV metrics
 
 ### Acknowledgements
-- AI was used to generate code in some parts of the files, which were then adapted to suit our project' discussed direction. It also helps us to learn some optimal tricks compared to the vanilla mechanisms. For example, to make our UDP protocol reliable, we chose selective repeat since go-back-N often has throttled performance. This help us evaluate tradeoffs and implement some knonwn optimisations. Refer to hudp/reliable.md
+- AI was used to generate code in some parts of the files, which were then adapted to suit our project' discussed direction. It also helps us to learn some optimal tricks compared to the vanilla mechanisms. For example, to make our UDP protocol reliable, we chose selective repeat since go-back-N often has throttled performance. This help us evaluate tradeoffs and implement some knonwn optimisations. Refer to hudp/reliable.md.
 ### Team Photo
   ![Team Photo](https://github.com/user-attachments/assets/58445cec-9b95-43c3-baeb-ab0d0385c937)
