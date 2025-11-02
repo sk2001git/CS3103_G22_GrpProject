@@ -57,20 +57,7 @@ class MetricsRecorder:
             'bytes': num_bytes,
             'latency_ms': one_way_latency
         })
-    def pdr(self) -> float:
-        """Packet Delivery Ratio (received/sent * 100)."""
-        total_sent = sum(stats['sent_count'] for stats in self.channel_stats.values())
-        total_recv = sum(stats['recv_count'] for stats in self.channel_stats.values())
-        if total_sent == 0:
-            return 0.0
-        return (total_recv / total_sent) * 100.0
-
-    def throughput_bps(self, duration_s: float) -> float:
-        """Throughput in bits per second over duration_s, using bytes_recv."""
-        total_bytes_recv = sum(stats['total_bytes_recv'] for stats in self.channel_stats.values())
-        if duration_s == 0:
-            return 0.0
-        return (total_bytes_recv * 8) / duration_s
+        return None
 
     def get_summary(self) -> dict:
         duration_s = time.monotonic() - self.start_time
@@ -79,14 +66,14 @@ class MetricsRecorder:
             sent = stats['sent_count']
             recv = stats['recv_count']
 
-            pdr = (recv / sent * 100.0) if sent > 0 else 0
+            pdr = round((recv / sent * 100.0), 2) if sent > 0 else 'N/A'
             avg_latency = (stats['total_latency_ms'] / recv) if recv > 0 else 0
             throughput_kbps = (stats['total_bytes_recv'] * 8 / duration_s / 1000) if duration_s > 0 else 0
 
             summary[ch] = {
                 'packets_sent': sent,
                 'packets_received': recv,
-                'packet_delivery_ratio_%': round(pdr, 2),
+                'packet_delivery_ratio_%': pdr,
                 'avg_latency_ms': round(avg_latency, 2),
                 'jitter_ms': round(stats['jitter'], 2),
                 'throughput_kbps': round(throughput_kbps, 2)
