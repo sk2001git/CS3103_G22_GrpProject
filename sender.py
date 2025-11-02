@@ -22,7 +22,8 @@ def main():
     parser.add_argument("--metrics", default="metrics_sender.csv", help="Output CSV for metrics")
     args = parser.parse_args()
 
-    api = GameNetAPI()
+    mr = MetricsRecorder()
+    api = GameNetAPI(metrics=mr)
     api.set_peer((args.server, args.port))
 
     if args.loss > 0 or args.delay > 0 or args.jitter > 0:
@@ -35,7 +36,6 @@ def main():
         api.attach_emulator(emulator)
 
     api.start()
-    mr = MetricsRecorder()
     print(f"Sending {args.pps} packets/sec for {args.duration} seconds to {args.server}:{args.port}")
 
     start_time = time.time()
@@ -64,7 +64,15 @@ def main():
         for ch, stats in summary.items():
             ch_name = "Reliable" if ch == RELIABLE else "Unreliable"
             print(f"  Channel {ch} ({ch_name}):")
-            print(f"    Packets Sent: {stats['packets_sent']}")
+            sent = stats.get('packets_sent', 0)
+            acked = stats.get('packets_received', 'N/A')
+            pdr = stats.get('packet_delivery_ratio_%', 'N/A')
+            print(f"    Packets Sent: {sent}")
+            if ch_name == "Reliable": print(f"    Packets Acked: {acked}")
+            if isinstance(pdr, (int, float)) and ch_name == "Reliable":
+                print(f"    Packet Delivery Ratio %: {pdr}%")
+            elif ch_name == "Reliable":
+                print(f"    Packet Delivery Ratio %: {pdr}")
         print("----------------------\n")
 
 if __name__ == "__main__":
