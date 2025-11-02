@@ -339,12 +339,12 @@ class SRReceiver:
                             self._buffer[seq] = (payload, now)
                         # else: silently drop OOO to avoid memory blowup
 
-            # Maintain/update hole timer: if expected is missing and not present in buffer, ensure timer running
-            if self._expected not in self._buffer:
-                if self._hole_since_ms is None:
-                    self._hole_since_ms = now
-            else:
-                self._hole_since_ms = None
+                    # Maintain/update hole timer: if expected is missing and not present in buffer, ensure timer running
+                    if self._expected not in self._buffer:
+                        if self._hole_since_ms is None:
+                            self._hole_since_ms = now
+                    else:
+                        self._hole_since_ms = None
 
         # callbacks out of lock
         for s, p in deliver_list:

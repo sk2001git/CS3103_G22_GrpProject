@@ -1,8 +1,7 @@
 # H-UDP Barebones (CS3103 A4)
 
 
-This repository contains **stubs** for the H-UDP project. All core methods raise
-`NotImplementedError` and include guidance comments. Implement these in your team.
+This repository contains our work for assignment 4, coded, directed, solved, by bipplane (Ryan Chen) and sk2001git (Sean Koh). One can only marvel at the sheer dedication of these two individuals, who, against all odds, managed to carry the entire weight of the project on their lone shoulders. Truly, a testament to their unparalleled work ethic and the... uh... "invaluable" moral support provided by their phantom collaborators. The other two, whose contributions remain a mystery veiled in the mists of time, must surely be commended for their exceptional ability to... well, provide some moral support and participation and meeting the requirement for the group quota i guess. A groundbreaking strategy, really. Bravo!
 
 
 ## Getting Started
@@ -30,6 +29,6 @@ This repository contains **stubs** for the H-UDP project. All core methods raise
 - `plot_metrics.py` — simple plotting of CSV metrics
 
 ### Acknowledgements
-- AI was used to generate code for the files, we adapt changes to it for our project. It also helps us to learn some optimal tricks compared to the vanilla mechanism. For example for reliable we chose selective repeat since go-back-n often has throttled performance. This help us evaluate tradeoff and implement some knonwn optimisation. Refer to hudp/reliable.md
+- AI was used to generate code in some parts of the files, which were then adapted to suit our project' discussed direction. It also helps us to learn some optimal tricks compared to the vanilla mechanisms. For example, to make our UDP protocol reliable, we chose selective repeat since go-back-N often has throttled performance. This help us evaluate tradeoffs and implement some knonwn optimisations. Refer to hudp/reliable.md.
 ### Team Photo
   ![Team Photo](https://github.com/user-attachments/assets/58445cec-9b95-43c3-baeb-ab0d0385c937)

@@ -84,23 +84,20 @@ class GameNetAPI:
         if not self.peer_addr:
             raise ConnectionError("No peer address, Call set_peer() first.")
 
-        channel = RELIABLE if reliable else UNRELIABLE
-
         if reliable:
-            seq_num = self._send_seq_reliable
-            self._send_seq_reliable += 1
+            # Let SRSender handle all sequence numbering for reliable packets
+            seq = self.sr_sender.send(payload)
+            if seq is None:
+                # Window is full, packet was not sent
+                return None
+            return len(payload) + HEADER_SIZE
         else:
+            # UNRELIABLE uses its own sequence numbers
             seq_num = self._send_seq_unreliable
             self._send_seq_unreliable += 1
-
-        header = pack_header(channel, seq_num)
-        data = header + payload
-
-        if reliable:
-            self._unacked_packets[seq_num] = (data, now_ms(), 0)
-
-        self._send_internal(data)
-        return len(data)
+            header = pack_header(UNRELIABLE, seq_num)
+            self._send_internal(header + payload)
+            return len(payload) + HEADER_SIZE
 
     def recv(self, block=True):
         if not block:
