@@ -74,6 +74,8 @@ class SRSender:
         self._srtt: Optional[float] = None
         self._rttvar: Optional[float] = None
         self._rto: float = float(rto_ms)
+        self._avg_rtt: Optional[float] = None
+        self._initial_rto = float(rto_ms)
         self._K = 4.0
         self._alpha = 1.0 / 8.0
         self._beta = 1.0 / 4.0
@@ -208,7 +210,7 @@ class SRSender:
         self._queue_packet_for_pacing(seq, serialized_payload, is_retransmission=False)
         return seq
 
-    def ack(self, ack_seq: int, peer_rwnd: int) -> None:
+    def ack(self, ack_seq: int, peer_rwnd: Optional[int] = None) -> None:
         # This method's logic doesn't change much, but the call to on_send_raw
         # at the end will now be correctly routed to the pacer queue.
         now = self.clock_ms()
@@ -216,7 +218,8 @@ class SRSender:
         fast_retransmit_item: Optional[_TxItem] = None
         
         with self._lock:
-            self._peer_rwnd = float(peer_rwnd)
+            if peer_rwnd is not None:
+                self._peer_rwnd = float(peer_rwnd)
             item_was_in_flight = self._out.pop(ack_seq, None)
 
             if item_was_in_flight:
@@ -261,17 +264,16 @@ class SRSender:
 
     def _update_rto(self, rtt_ms: int) -> None:
         rtt = float(rtt_ms)
-        if self._srtt is None:
-            self._srtt = rtt
+        if self._avg_rtt is None:
+            self._avg_rtt = rtt
             self._rttvar = rtt / 2.0
         else:
             self._rttvar = (1 - self._beta) * self._rttvar + self._beta * abs(self._srtt - rtt)
-            self._srtt = (1 - self._alpha) * self._srtt + self._alpha * rtt
+            self._avg_rtt = (1 - self._alpha) * self._avg_rtt + self._alpha * rtt
 
-        self._rto = self._srtt + self._K * (self._rttvar if self._rttvar is not None else 0.0)
-        self._rto = max(self._min_rto, min(self._rto, self._max_rto))
-        # print(f"[SENDER] RTO updated. SRTT={self._srtt:.1f}ms, RTTVar={self._rttvar:.1f}ms -> New RTO={self._rto:.1f}ms")
-
+        candidate = max(self._initial_rto, 2.0 * self._avg_rtt)
+        self._rto = max(self._min_rto, min(candidate, self._max_rto))
+         # Keep SR RTT/RTTVAR machinery unchanged if present (no-op if not used)
 
     def _backoff_rto(self) -> None:
         rto_before = self._rto
