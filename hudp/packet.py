@@ -14,7 +14,7 @@ HEADER_FORMAT = "!BHI"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 
 # ACK Packet
-ACK_FORMAT = "!BH"
+ACK_FORMAT = "!BHH"
 ACK_SIZE = struct.calcsize(ACK_FORMAT)
 @dataclass
 class PacketHeader:
@@ -38,11 +38,11 @@ def unpack_header(data: bytes) -> PacketHeader:
     channel, seq_num, timestamp = struct.unpack(HEADER_FORMAT, data)
     return PacketHeader(channel, seq_num, timestamp)
 
-def pack_ack(seq_num: int) -> bytes:
-    """Packs ACK packet."""
-    return struct.pack(ACK_FORMAT, ACK, seq_num)
+def pack_ack(seq_num: int, recv_window: int) -> bytes:
+    """Packs ACK packet with the receiver's available window size."""
+    return struct.pack(ACK_FORMAT, ACK, seq_num, recv_window)
 
-def unpack_ack(data: bytes) -> int:
+def unpack_ack(data: bytes) -> tuple[int, int]:
     """Unpacks ACK packet to get seq num."""
-    _, seq_num = struct.unpack(ACK_FORMAT, data)
-    return seq_num
+    _, seq_num, recv_window = struct.unpack(ACK_FORMAT, data)
+    return seq_num, recv_window
