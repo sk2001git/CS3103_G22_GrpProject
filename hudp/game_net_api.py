@@ -21,7 +21,13 @@ class GameNetAPI:
     - For reliable: integrate SRSender/SRReceiver, ACK wiring
     - Expose header timestamp to app for one-way latency measurements
     """
-    def __init__(self, bind_addr=('0.0.0.0', 0), skip_threshold_ms=200, on_drop: Optional[Callable[[int], None]] = None):
+    def __init__(
+        self,
+        bind_addr: Tuple[str, int] = ('0.0.0.0', 0),
+        # Default skip threshold to reflect ~1.5RTT links
+        skip_threshold_ms: int = 300,
+        on_drop: Optional[Callable[[int], None]] = None,
+        metrics=None):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(bind_addr)
         self.peer_addr = None
@@ -40,10 +46,11 @@ class GameNetAPI:
         self.emulator = None
         self.SKIP_THRESHOLD_MS = skip_threshold_ms
         self.on_drop = on_drop
+        self.metrics = metrics
 
         self._rx_ts = {}  # seq -> header.timestamp_ms for reliable delivery
         self.sr_sender = SRSender(
-            window_size=64,
+            window_size=32,
             rto_ms=200,
             max_retries=10,
             on_send_raw=self._sr_on_send_raw,  # wrap + send reliable
@@ -56,7 +63,7 @@ class GameNetAPI:
             send_ack=self._sr_send_ack,        # emit ACKs
             skip_threshold_ms=skip_threshold_ms,
             clock_ms=lambda: int(time.time() * 1000),
-            window_size=64,
+            window_size=32,
         )
 
     def start(self):
@@ -150,6 +157,12 @@ class GameNetAPI:
         """Handles an incoming ACK packet."""
         ack_seq, recv_window = unpack_ack(data) 
         self.sr_sender.ack(ack_seq, recv_window)
+        try:
+            if self.metrics:
+                self.metrics.on_ack(RELIABLE, ACK_SIZE)
+        except Exception:
+            # Metrics updates must not crash packet processing
+            pass
 
     def _sr_on_send_raw(self, seq: int, payload: bytes) -> None:
         """Wrap reliable payload with your header and send."""
@@ -157,6 +170,11 @@ class GameNetAPI:
             return
         hdr = pack_header(RELIABLE, seq)
         self._send_internal(hdr + payload)
+        try:
+            if self.metrics:
+                self.metrics.on_sent(RELIABLE, len(payload) + HEADER_SIZE)
+        except Exception:
+            pass
 
     def _sr_send_ack(self, ack_seq: int, recv_window: int) -> None:
         """Emit per-packet ACK (unchanged wire format)."""
@@ -180,8 +198,3 @@ class GameNetAPI:
     def _sr_on_rtt(self, seq: int, rtt_ms: int) -> None:
         # Hook for metrics if desired
         pass
-     
-
-
-
-   

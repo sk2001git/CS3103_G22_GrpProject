@@ -93,6 +93,15 @@ class MetricsRecorder:
             }
         return summary
 
+    def on_ack(self, channel: int, num_bytes: int = 0) -> None:
+        """Record that an ACK (or ACK-like signal) was received for the given channel.
+        This is used by sender-side code to count acknowledgements as "received".
+        It does not update latency/jitter (ACKs don't carry the original header timestamp).
+        """
+        stats = self.channel_stats[channel]
+        stats['recv_count'] += 1
+        stats['total_bytes_recv'] += num_bytes
+
     def export_csv(self, filename: str):
         if not self.records:
             return
@@ -100,3 +109,4 @@ class MetricsRecorder:
             writer = csv.DictWriter(f, fieldnames=self.records[0].keys())
             writer.writeheader()
             writer.writerows(self.records)
+
