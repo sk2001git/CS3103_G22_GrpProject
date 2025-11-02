@@ -1,9 +1,9 @@
 from __future__ import annotations
 import argparse
 import time
-
-from hudp.game_net_api import GameNetAPI
 from hudp.packet import RELIABLE, UNRELIABLE, now_ms
+from hudp.game_net_api import GameNetAPI
+from hudp.packet import RELIABLE, now_ms
 from hudp.metrics import MetricsRecorder
 
 def main():
@@ -15,8 +15,8 @@ def main():
     args = parser.parse_args()
 
     api = GameNetAPI(bind_addr=(args.bind, args.port), skip_threshold_ms=args.t_skip)
-    api.start()
     mr = MetricsRecorder()
+    api.start()
     print(f"Receiver listening on {args.bind}:{args.port}")
 
     try:
@@ -38,7 +38,14 @@ def main():
             ch_name = "Reliable" if ch == RELIABLE else "Unreliable"
             print(f"  Channel {ch} ({ch_name}):")
             for key, val in stats.items():
-                print(f"    {key.replace('_', ' ').title()}: {val}")
+                label = key.replace('_', ' ').title()
+                if key == 'packet_delivery_ratio_%':
+                    if isinstance(val, (int, float)):
+                        print(f"    {label}: {val}%")
+                    else:
+                        print(f"    {label}: {val}")
+                else:
+                    print(f"    {label}: {val}")
         print(f"Metrics data exported to {args.metrics}")
         print("------------------------\n")
 
