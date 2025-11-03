@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
+import os
 
 
 def compute_metrics(sender_csv: str, receiver_csv: str):
@@ -82,13 +83,33 @@ def main():
     parser.add_argument("--out", default="metrics_summary.png", help="Output combined plot filename")
     args = parser.parse_args()
 
-    df_metrics = compute_metrics(args.sender, args.receiver)
+    results_dir = os.path.join(os.getcwd(), "results")
+    os.makedirs(results_dir, exist_ok=True)
+
+    sender_path = os.path.join(results_dir, os.path.basename(args.sender))
+    receiver_path = os.path.join(results_dir, os.path.basename(args.receiver))
+    out_path = os.path.join(results_dir, os.path.basename(args.out))
+
+    missing = []
+    if not os.path.exists(sender_path):
+        missing.append(sender_path)
+    if not os.path.exists(receiver_path):
+        missing.append(receiver_path)
+
+    if missing:
+        print("Error: The following required CSV file(s) were not found:")
+        for path in missing:
+            print(f"  - {path}")
+        print("\nPlease ensure both sender and receiver metrics CSVs are exported under the 'results/' folder.")
+        return
+
+    df_metrics = compute_metrics(sender_path, receiver_path)
     print("\n=== Computed Metrics Summary ===")
     print(df_metrics.to_string(index=False))
     print()
 
-    plot_all_metrics(df_metrics, args.out)
-    print(f"Combined metrics summary plot saved to: {args.out}")
+    plot_all_metrics(df_metrics, out_path)
+    print(f"Combined metrics summary plot saved to: {out_path}")
 
 
 if __name__ == "__main__":

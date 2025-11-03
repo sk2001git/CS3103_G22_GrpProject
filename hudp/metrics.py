@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+import os
 from typing import List, Dict, Optional
 import csv
 import time
@@ -103,8 +104,13 @@ class MetricsRecorder:
     def export_csv(self, filename: str):
         if not self.records:
             return
-        with open(filename, 'w', newline='') as f:
+        
+        os.makedirs("results", exist_ok=True)
+        filepath = os.path.join("results", filename)
+
+        with open(filepath, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=self.records[0].keys())
             writer.writeheader()
             writer.writerows(self.records)
 
+        print(f"Metrics data exported to {filepath}")
