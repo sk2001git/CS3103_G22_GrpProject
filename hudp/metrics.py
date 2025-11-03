@@ -26,6 +26,8 @@ class MetricsRecorder:
 
     def on_sent(self, channel, num_bytes: int) -> None:
         """Record a single packet sent on this channel."""
+        if num_bytes is None:
+            num_bytes = 0  # Defensive programming for metrics
         stats = self.channel_stats[channel]
         stats['sent_count'] += 1
         stats['total_bytes_sent'] += num_bytes
