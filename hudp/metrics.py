@@ -26,9 +26,20 @@ class MetricsRecorder:
 
     def on_sent(self, channel, num_bytes: int) -> None:
         """Record a single packet sent on this channel."""
+        if num_bytes is None:
+            num_bytes = 0  # Defensive programming for unexpected None
         stats = self.channel_stats[channel]
         stats['sent_count'] += 1
         stats['total_bytes_sent'] += num_bytes
+
+        # Add a per-packet record so export_csv actually has something to write
+        self.records.append({
+            'timestamp_s': time.monotonic() - self.start_time,
+            'channel': channel,
+            'bytes': num_bytes,
+            # For the sender, 'latency_ms' is not meaningful; placeholder 0
+            'latency_ms': 0.0,
+        })
 
     def on_recv(self, channel: int, num_bytes: int, one_way_ms: Optional[float], header_ts_ms: int) -> None:
         """

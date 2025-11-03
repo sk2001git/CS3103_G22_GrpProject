@@ -59,6 +59,8 @@ def main():
         print("Stopping API and generating report...")
         api.stop()
 
+        mr.export_csv(args.metrics)
+
         summary = mr.get_summary()
         print("\n--- Sender Summary ---")
         for ch, stats in summary.items():
