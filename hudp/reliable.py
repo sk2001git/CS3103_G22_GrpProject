@@ -268,7 +268,7 @@ class SRSender:
             self._avg_rtt = rtt
             self._rttvar = rtt / 2.0
         else:
-            self._rttvar = (1 - self._beta) * self._rttvar + self._beta * abs(self._srtt - rtt)
+            self._rttvar = (1 - self._beta) * self._rttvar + self._beta * abs(self._avg_rtt - rtt)
             self._avg_rtt = (1 - self._alpha) * self._avg_rtt + self._alpha * rtt
 
         candidate = max(self._initial_rto, 2.0 * self._avg_rtt)
