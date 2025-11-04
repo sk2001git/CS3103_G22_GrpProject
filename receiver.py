@@ -1,3 +1,4 @@
+# receiver.py
 from __future__ import annotations
 import argparse
 import time
@@ -14,15 +15,19 @@ def main():
     parser.add_argument("--t_skip", type=int, default=200, help="Skip threshold t (ms) for reliable holes")
     args = parser.parse_args()
 
+    mr = MetricsRecorder(role="receiver")
     api = GameNetAPI(bind_addr=(args.bind, args.port), skip_threshold_ms=args.t_skip)
-    mr = MetricsRecorder()
     api.start()
     print(f"Receiver listening on {args.bind}:{args.port}")
 
     try:
         while True:
             channel, seq_num, ts, payload = api.recv(block=True)
-            mr.on_recv(channel, len(payload) + 7, 0, ts)  # 7 bytes for header
+            
+            # Calculate actual bytes including header (7 bytes)
+            total_bytes = len(payload) + 7
+            mr.on_recv(channel, seq_num, total_bytes, ts)  # Pass sequence and actual bytes
+            
             ch_type = "RELIABLE" if channel == RELIABLE else "UNRELIABLE"
             latency = now_ms() - ts
             print(f"[{ch_type}] Seq: {seq_num}, Latency: {latency}ms, Payload: {payload.decode('utf-8')}")
@@ -34,19 +39,20 @@ def main():
         mr.export_csv(args.metrics)
         summary = mr.get_summary()
         print("\n--- Receiver Summary ---")
-        for ch, stats in summary.items():
-            ch_name = "Reliable" if ch == RELIABLE else "Unreliable"
-            print(f"  Channel {ch} ({ch_name}):")
-            for key, val in stats.items():
-                label = key.replace('_', ' ').title()
-                if key == 'packet_delivery_ratio_%':
-                    if isinstance(val, (int, float)):
-                        print(f"    {label}: {val}%")
-                    else:
-                        print(f"    {label}: {val}")
-                else:
-                    print(f"    {label}: {val}")
+        
+        # Print Channel 0 (Reliable) first, then Channel 1 (Unreliable)
+        for ch in [RELIABLE, UNRELIABLE]:
+            if ch in summary:
+                stats = summary[ch]
+                ch_name = "Reliable" if ch == RELIABLE else "Unreliable"
+                print(f"  Channel {ch} ({ch_name}):")
+                print(f"    Packets Received: {stats['packets_received']}")
+                print(f"    Average Latency: {stats['avg_latency_ms']} ms")
+                print(f"    Jitter: {stats['jitter_ms']} ms")
+                print(f"    Throughput: {stats['throughput_kbps']} kbps")
+            
         print(f"Metrics data exported to {args.metrics}")
+        print("Note: For Packet Delivery Ratio, use plot_metrics.py with sender data")
         print("------------------------\n")
 
 if __name__ == "__main__":

@@ -216,6 +216,7 @@ class SRSender:
         now = self.clock_ms()
         rtt_sample: Optional[int] = None
         fast_retransmit_item: Optional[_TxItem] = None
+        was_new_ack = False
         
         with self._lock:
             if peer_rwnd is not None:
@@ -223,6 +224,7 @@ class SRSender:
             item_was_in_flight = self._out.pop(ack_seq, None)
 
             if item_was_in_flight:
+                was_new_ack = True
                 self._cv.notify_all()
                 if item_was_in_flight.retries == 0:
                     rtt_sample = max(1, now - item_was_in_flight.first_send_ms)
@@ -238,6 +240,7 @@ class SRSender:
                 while self._base != self._next_seq and self._base not in self._out:
                     self._base = u16_incr(self._base, 1)
             else:
+                was_new_ack = False
                 self._dupacks += 1
                 print(f"[SENDER] <- ACK {ack_seq} (DUPLICATE). Count={self._dupacks}/{self._dupacks_threshold}. Base={self._base}")
 
@@ -261,6 +264,7 @@ class SRSender:
             self._queue_packet_for_pacing(
                 fast_retransmit_item.seq, fast_retransmit_item.payload, is_retransmission=True
             )
+        return was_new_ack
 
     def _update_rto(self, rtt_ms: int) -> None:
         rtt = float(rtt_ms)

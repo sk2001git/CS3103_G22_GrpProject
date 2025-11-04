@@ -48,6 +48,15 @@ class GameNetAPI:
         self.on_drop = on_drop
         self.metrics = metrics
 
+        # Initialize metrics with a dummy if none provided
+        if self.metrics is None:
+        # Create a dummy metrics object that has the required methods but does nothing
+            class DummyMetrics:
+                def on_sent(self, *args, **kwargs): pass
+                def on_recv(self, *args, **kwargs): pass
+                def on_ack(self, *args, **kwargs): pass
+            self.metrics = DummyMetrics()
+
         self._rx_ts = {}  # seq -> header.timestamp_ms for reliable delivery
         self.sr_sender = SRSender(
             window_size=32,
@@ -93,14 +102,23 @@ class GameNetAPI:
             if seq is None:
                 # Window is full, packet was not sent
                 return None
+            
+            # Calculate actual bytes including header
+            total_bytes = HEADER_SIZE + len(payload)
+            if self.metrics:  # ADD THIS CHECK
+                self.metrics.on_sent(RELIABLE, seq, total_bytes)
             return seq
         else:
             # UNRELIABLE uses its own sequence numbers
             seq_num = self._send_seq_unreliable
             self._send_seq_unreliable += 1
             header = pack_header(UNRELIABLE, seq_num)
+            total_bytes = len(header) + len(payload)
+            if self.metrics:  # ADD THIS CHECK
+                self.metrics.on_sent(UNRELIABLE, seq_num, total_bytes)
             self._send_internal(header + payload)
             return seq_num
+
         
     def recv(self, block=True, timeout=None):
         start_time = time.time()
@@ -156,10 +174,11 @@ class GameNetAPI:
     def _handle_ack(self, data: bytes):
         """Handles an incoming ACK packet."""
         ack_seq, recv_window = unpack_ack(data) 
-        self.sr_sender.ack(ack_seq, recv_window)
+        was_new_ack = self.sr_sender.ack(ack_seq, recv_window)
+        
         try:
-            if self.metrics:
-                self.metrics.on_ack(RELIABLE, ACK_SIZE)
+            if self.metrics and was_new_ack:  # Only record new ACKs, not duplicates
+                self.metrics.on_ack(RELIABLE, ack_seq, ACK_SIZE)
         except Exception:
             # Metrics updates must not crash packet processing
             pass
@@ -169,12 +188,10 @@ class GameNetAPI:
         if not self.peer_addr:
             return
         hdr = pack_header(RELIABLE, seq)
+        total_bytes = len(hdr) + len(payload)
+        if self.metrics:  # ADD THIS CHECK
+            self.metrics.on_sent(RELIABLE, seq, total_bytes)
         self._send_internal(hdr + payload)
-        try:
-            if self.metrics:
-                self.metrics.on_sent(RELIABLE, len(payload) + HEADER_SIZE)
-        except Exception:
-            pass
 
     def _sr_send_ack(self, ack_seq: int, recv_window: int) -> None:
         """Emit per-packet ACK (unchanged wire format)."""

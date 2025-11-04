@@ -1,8 +1,9 @@
-# sender.py (bare-bones stub)
+# sender.py
 
 from __future__ import annotations
 import argparse
 import time
+import os
 import random
 
 from hudp.game_net_api import GameNetAPI
@@ -22,7 +23,7 @@ def main():
     parser.add_argument("--metrics", default="metrics_sender.csv", help="Output CSV for metrics")
     args = parser.parse_args()
 
-    mr = MetricsRecorder()
+    mr = MetricsRecorder(role="sender")
     api = GameNetAPI(metrics=mr)
     api.set_peer((args.server, args.port))
 
@@ -42,13 +43,17 @@ def main():
     packet_count = 0
     try:
         while time.time() - start_time < args.duration:
-            is_reliable = random.random() < 0.2 # simulate that 20% of packets are reliable
+            is_reliable = random.random() < 0.2
             channel = RELIABLE if is_reliable else UNRELIABLE
 
             payload = f"packet_{packet_count}".encode('utf-8')
 
-            num_bytes = api.send(payload, reliable=is_reliable)
-            mr.on_sent(channel, num_bytes)
+            # Send and get sequence number
+            seq_num = api.send(payload, reliable=is_reliable)
+            
+            # Calculate actual bytes including header (7 bytes)
+            total_bytes = len(payload) + 7
+            mr.on_sent(channel, seq_num, total_bytes)  # Pass sequence and actual bytes
 
             packet_count += 1
             time.sleep(1.0 / args.pps)
@@ -61,21 +66,41 @@ def main():
 
         mr.export_csv(args.metrics)
 
-        summary = mr.get_summary()
-        print("\n--- Sender Summary ---")
-        for ch, stats in summary.items():
-            ch_name = "Reliable" if ch == RELIABLE else "Unreliable"
-            print(f"  Channel {ch} ({ch_name}):")
-            sent = stats.get('packets_sent', 0)
-            acked = stats.get('packets_received', 'N/A')
-            pdr = stats.get('packet_delivery_ratio_%', 'N/A')
-            print(f"    Packets Sent: {sent}")
-            if ch_name == "Reliable": print(f"    Packets Acked: {acked}")
-            if isinstance(pdr, (int, float)) and ch_name == "Reliable":
-                print(f"    Packet Delivery Ratio %: {pdr}%")
-            elif ch_name == "Reliable":
-                print(f"    Packet Delivery Ratio %: {pdr}")
-        print("----------------------\n")
+        # Read the CSV to count unique sequences (like plot_metrics does)
+        import pandas as pd
+        try:
+            df_send = pd.read_csv(os.path.join("results", args.metrics))
+            
+            # Count unique sequences per channel
+            reliable_sent = df_send[df_send['channel'] == 0]['sequence'].nunique()
+            unreliable_sent = df_send[df_send['channel'] == 1]['sequence'].nunique()
+            
+            # Get ACK count from metrics
+            summary = mr.get_summary()
+            reliable_acked = summary[0]['packets_received'] if 0 in summary else 0
+            
+        except Exception as e:
+            print(f"Error analyzing metrics: {e}")
+            # Fallback to old method
+            summary = mr.get_summary()
+            reliable_sent = summary[0]['packets_sent'] if 0 in summary else 0
+            unreliable_sent = summary[1]['packets_sent'] if 1 in summary else 0
+            reliable_acked = summary[0]['packets_received'] if 0 in summary else 0
 
+        print("\n--- Sender Summary ---")
+        print(f"  Channel 0 (Reliable):")
+        print(f"    Unique Packets Sent: {reliable_sent}")
+        print(f"    Unique ACKs Received: {reliable_acked}")
+        if reliable_sent > 0:
+            pdr = (reliable_acked / reliable_sent * 100.0)
+            print(f"    ACK-based Delivery Ratio: {pdr:.2f}%")
+        else:
+            print(f"    ACK-based Delivery Ratio: N/A")
+        
+        print(f"  Channel 1 (Unreliable):")
+        print(f"    Unique Packets Sent: {unreliable_sent}")
+        print(f"    Packet Delivery Ratio: N/A (use receiver metrics)")
+        print("----------------------\n")
+        
 if __name__ == "__main__":
     main()

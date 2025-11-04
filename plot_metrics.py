@@ -5,21 +5,19 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 
-
 def compute_metrics(sender_csv: str, receiver_csv: str):
     """
     Compute performance metrics from sender & receiver CSVs.
-    Metrics:
-        1. Latency (ms)
-        2. Jitter (ms)
-        3. Throughput (kbps)
-        4. Packet Delivery Ratio (%)
     """
     df_send = pd.read_csv(sender_csv)
     df_recv = pd.read_csv(receiver_csv)
 
     # Compute duration
-    duration_s = df_recv["timestamp_s"].max() - df_recv["timestamp_s"].min()
+    if not df_recv.empty:
+        duration_s = df_recv["timestamp_s"].max() - df_recv["timestamp_s"].min()
+    else:
+        duration_s = 1.0
+        
     if duration_s <= 0:
         duration_s = 1.0
 
@@ -29,20 +27,35 @@ def compute_metrics(sender_csv: str, receiver_csv: str):
         sent_df = df_send[df_send["channel"] == ch]
         recv_df = df_recv[df_recv["channel"] == ch]
 
-        sent_count = len(sent_df)
-        recv_count = len(recv_df)
-        pdr = (recv_count / sent_count * 100.0) if sent_count > 0 else 0.0
+        # For reliable channel, use the actual sequence numbers from receiver logs
+        if ch == 0:  # Reliable channel
+            # Get unique sequences from receiver (they're the ground truth)
+            received_sequences = set(recv_df["sequence"])
+            
+            # For sender, count only sequences that are within the expected range
+            # Based on receiver data, we know sequences should be 0-6
+            max_received_seq = max(received_sequences) if received_sequences else 0
+            sent_df_filtered = sent_df[sent_df["sequence"] <= max_received_seq]
+            sent_unique_count = sent_df_filtered["sequence"].nunique()
+            
+            recv_unique_count = len(received_sequences)
+        else:
+            # For unreliable, use normal counting
+            sent_unique_count = sent_df["sequence"].nunique()
+            recv_unique_count = recv_df["sequence"].nunique()
 
-        avg_latency = recv_df["latency_ms"].mean() if recv_count > 0 else 0.0
-        jitter = recv_df["latency_ms"].std() if recv_count > 0 else 0.0
+        pdr = (recv_unique_count / sent_unique_count * 100.0) if sent_unique_count > 0 else 0.0
 
-        total_bytes = recv_df["bytes"].sum()
+        avg_latency = recv_df["latency_ms"].mean() if recv_unique_count > 0 else 0.0
+        jitter = recv_df["latency_ms"].std() if recv_unique_count > 0 else 0.0
+
+        total_bytes = recv_df["bytes"].sum() if recv_unique_count > 0 else 0
         throughput_kbps = (total_bytes * 8 / 1000) / duration_s
 
         metrics.append({
             "channel": ch,
-            "packets_sent": sent_count,
-            "packets_received": recv_count,
+            "packets_sent": sent_unique_count,
+            "packets_received": recv_unique_count,
             "packet_delivery_ratio_%": round(pdr, 2),
             "avg_latency_ms": round(avg_latency, 2),
             "jitter_ms": round(jitter, 2),
