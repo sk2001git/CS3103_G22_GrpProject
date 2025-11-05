@@ -18,6 +18,7 @@ This repository contains our work for assignment 4, coded, directed, solved, by 
 - Receiver: `python receiver.py --bind 127.0.0.1 --port 50000`
 - Sender: `python sender.py --server 127.0.0.1 --port 50000 --pps 30 --duration 30`
 - Metrics Summary: `python plot_metrics.py`
+- Experiment Pipelines: `./{ delay | jitter | loss }.sh`
 
 
 ## Files to Implement
