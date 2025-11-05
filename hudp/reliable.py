@@ -393,7 +393,7 @@ class SRReceiver:
             if u16_in_window(seq, self._expected, self.window_size):
                 if seq == self._expected:
                     # --- Case A: IN-ORDER PACKET ---
-                    print(f"[RECEIVER] <- Data {seq} (IN-ORDER). Delivering.")
+                    print(f"[RECEIVER] <- Data {seq} (IN-ORDER). Delivering to app.")
                     deliver_list.append((seq, payload))
                     processed_successfully = True
                     self._expected = u16_incr(self._expected)
@@ -434,7 +434,7 @@ class SRReceiver:
             # Send ACK if we handled the packet
             if should_ack and processed_successfully:
                 available_window = self.max_buffer - len(self._buffer)
-                print(f"[RECEIVER] -> ACK for {seq}. (Available buffer: {available_window})")
+                print(f"[RECEIVER] -> Queued ACK {seq}. (Available buffer: {available_window})")
                 self.send_ack(seq, available_window)
 
         # --- Deliver Data outside the lock ---

@@ -30,8 +30,10 @@ def main():
             
             ch_type = "RELIABLE" if channel == RELIABLE else "UNRELIABLE"
             latency = now_ms() - ts
-            print(f"[{ch_type}] Seq: {seq_num}, Latency: {latency}ms, Payload: {payload.decode('utf-8')}")
-
+            if ch_type == "UNRELIABLE":
+                print(f"({ch_type}) Seq: {seq_num}, Latency: {latency}ms, Payload: {payload.decode('utf-8')}")
+            elif ch_type == "RELIABLE":
+                print(f"( {ch_type} ) Seq: {seq_num}, Latency: {latency}ms, Payload: {payload.decode('utf-8')}")
     except KeyboardInterrupt:
         print("\nReceiver shutting down.")
     finally:
