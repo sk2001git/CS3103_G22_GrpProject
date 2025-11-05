@@ -52,6 +52,7 @@ for DELAY in "${DELAYS[@]}"; do
         --bind $BIND_IP \
         --port $PORT \
         --metrics "$METRICS_FILE" \
+        --t_skip $T_SKIP \
         > "$RECEIVER_LOG" 2>&1 &
     
     RECEIVER_PID=$!

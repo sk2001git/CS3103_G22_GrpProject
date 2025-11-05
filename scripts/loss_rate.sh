@@ -27,6 +27,7 @@ DELAY=300
 JITTER=300
 PPS=30
 DURATION=30
+T_SKIP=2000
 
 # Base output directory
 BASE_DIR="experiment_data/${EXP_NAME}"
@@ -52,6 +53,7 @@ for LOSS in "${LOSS_RATES[@]}"; do
         --bind $BIND_IP \
         --port $PORT \
         --metrics "$METRICS_FILE" \
+        --t_skip $T_SKIP \
         > "$RECEIVER_LOG" 2>&1 &
     
     RECEIVER_PID=$!
