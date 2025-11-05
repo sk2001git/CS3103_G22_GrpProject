@@ -82,8 +82,14 @@ class GameNetAPI:
 
     def stop(self):
         self.running = False
+        try: self.notify_peer_shutdown()
+        except Exception: pass
+        # small grace period for peer to receive zero-window notification
+        time.sleep(0.1)
+        # close socket and join thread
         self.sr_sender.stop()
-        self.sock.close()
+        try: self.sock.close()
+        except Exception: pass
         self._recv_thread.join(timeout=1.0)
 
     def set_peer(self, addr):
@@ -210,8 +216,28 @@ class GameNetAPI:
         if self.on_drop:
             self.on_drop(seq)
 
-
+    def notify_peer_shutdown(self, notify_count: int = 3, interval_ms: int = 50) -> None:
+        """Send a few zero-window ACKs to tell peer to stop sending."""
+        if not self.peer_addr:
+            return
+        try:
+            # Use last in-order seq (expected - 1) from the SRReceiver if available
+            ack_seq = 0
+            try:
+                ack_seq = (self.sr_receiver._expected - 1) & 0xFFFF
+            except Exception:
+                ack_seq = 0
+            ack_packet = pack_ack(ack_seq, 0)
+            for _ in range(notify_count):
+                self._send_internal(ack_packet)
+                time.sleep(interval_ms / 1000.0)
+        except Exception:
+            pass
 
     def _sr_on_rtt(self, seq: int, rtt_ms: int) -> None:
         # Hook for metrics if desired
         pass
+
+    def is_peer_shutdown(self) -> bool:
+        """Check if the peer has signaled shutdown (zero receive window)."""
+        return self.sr_sender._peer_rwnd == 0

@@ -476,3 +476,43 @@ class SRReceiver:
                     print(f"[RECEIVER] !! Error delivering packet {s} after skip: {e}")
 
             self._stop_evt.wait(tick_ms / 1000.0)
+
+    def _pacing_loop(self) -> None:
+        """
+        Runs in a dedicated thread, pulling packets from a queue and sending
+        them at a rate controlled by the congestion window and RTT.
+        Now also respects the remote advertised window: if peer_rwnd <= 0
+        the pacer will pause and requeue the packet.
+        """
+        while not self._stop_evt.is_set():
+            packet_to_send = None
+            with self._lock:
+                if self._pacing_queue:
+                    packet_to_send = self._pacing_queue.popleft()
+
+            if packet_to_send:
+                seq, payload = packet_to_send
+
+                # Respect peer advertised window; if it's zero, requeue and wait a bit.
+                with self._lock:
+                    effective_win = self._get_effective_window()
+                    if effective_win < 1:
+                        # Put it back at front to preserve priority and wait to be notified
+                        self._pacing_queue.appendleft((seq, payload))
+                        # Wait until either stop requested or a short timeout; ack() will notify on window changes
+                        # Use a short wait so shutdown remains responsive
+                        self._stop_evt.wait(0.05)
+                        continue
+
+                # Send the packet using the actual socket function
+                self.on_send_raw(seq, payload)
+
+                # Calculate the delay until the next packet can be sent
+                with self._lock:
+                    rtt_s = (self._srtt / 1000.0) if self._srtt is not None else (self._rto / 1000.0)
+                    cwnd = self._cwnd if self._cwnd >= 1.0 else 1.0
+
+                inter_packet_gap_s = rtt_s / cwnd
+                self._stop_evt.wait(inter_packet_gap_s)
+            else:
+                self._stop_evt.wait(0.001)

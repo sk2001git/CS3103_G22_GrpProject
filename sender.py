@@ -43,6 +43,11 @@ def main():
     packet_count = 0
     try:
         while time.time() - start_time < args.duration:
+            # Check if peer has signaled shutdown (zero window)
+            if api.is_peer_shutdown():
+                print("\nPeer has shut down (received zero-window signal). Stopping sender.")
+                break
+
             is_reliable = random.random() < 0.2
             channel = RELIABLE if is_reliable else UNRELIABLE
 
@@ -51,6 +56,15 @@ def main():
             # Send and get sequence number
             seq_num = api.send(payload, reliable=is_reliable)
             
+            if seq_num is None:
+                # Window is full, check if peer shut down
+                if api.is_peer_shutdown():
+                    print("\nPeer has shut down while window was full. Stopping sender.")
+                    break
+                # Otherwise just skip this packet and continue
+                time.sleep(0.01)
+                continue
+
             # Calculate actual bytes including header (7 bytes)
             total_bytes = len(payload) + 7
             mr.on_sent(channel, seq_num, total_bytes)  # Pass sequence and actual bytes
