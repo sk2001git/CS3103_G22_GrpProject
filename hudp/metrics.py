@@ -114,12 +114,9 @@ class MetricsRecorder:
         stats['recv_count'] += 1
         stats['total_bytes_recv'] += num_bytes
 
-    def export_csv(self, filename: str):
+    def export_csv(self, filepath: str):
         if not self.records:
             return
-        
-        os.makedirs("results", exist_ok=True)
-        filepath = os.path.join("results", filename)
 
         with open(filepath, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=self.records[0].keys())

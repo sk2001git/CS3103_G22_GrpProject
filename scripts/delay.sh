@@ -27,6 +27,7 @@ DELAYS=(10 50 100 200 400 800)
 JITTER=300
 PPS=30
 DURATION=30
+T_SKIP=$(( DURATION * 1000 ))
 
 # Base output directory
 BASE_DIR="experiment_data/${EXP_NAME}"
@@ -43,7 +44,8 @@ for DELAY in "${DELAYS[@]}"; do
     mkdir -p "$EXP_DIR"
 
     # Output file paths
-    METRICS_FILE="${EXP_DIR}/metrics_${EXP_NAME}_${DELAY}.csv"
+    RECEIVER_METRICS_FILE="${EXP_DIR}/receiver_metrics_${EXP_NAME}_${DELAY}.csv"
+    SENDER_METRICS_FILE="${EXP_DIR}/sender_metrics_${EXP_NAME}_${DELAY}.csv"
     RECEIVER_LOG="${EXP_DIR}/receiver_${EXP_NAME}_${DELAY}.log"
     SENDER_LOG="${EXP_DIR}/sender_${EXP_NAME}_${DELAY}.log"
 
@@ -51,7 +53,7 @@ for DELAY in "${DELAYS[@]}"; do
     python receiver.py \
         --bind $BIND_IP \
         --port $PORT \
-        --metrics "$METRICS_FILE" \
+        --metrics "$RECEIVER_METRICS_FILE" \
         --t_skip $T_SKIP \
         > "$RECEIVER_LOG" 2>&1 &
     
@@ -72,6 +74,7 @@ for DELAY in "${DELAYS[@]}"; do
         --delay $DELAY \
         --jitter $JITTER \
         --duration $DURATION \
+        --metrics $SENDER_METRICS_FILE \
         > "$SENDER_LOG" 2>&1
 
     echo "Sending finished"
@@ -82,6 +85,16 @@ for DELAY in "${DELAYS[@]}"; do
     kill $RECEIVER_PID
     wait $RECEIVER_PID
 
+    PID=$(lsof -t -i :$PORT)
+    if [ -n "$PID" ]; then
+        echo "Port $PORT is in use by PID $PID. Killing it..."
+        kill -9 $PID
+        sleep 1
+    else
+        echo "Port $PORT is free."
+    fi
+
+    sleep 2
     echo "Experiment with ${EXP_NAME}=$DELAY completed."
     echo "Results saved in $EXP_DIR"
     echo
@@ -91,3 +104,9 @@ done
 deactivate
 
 echo "All experiments finished. Results stored in $BASE_DIR"
+
+echo "Calculating metrics"
+
+python plot_experiment_metrics.py --EXP_NAME=$EXP_NAME --BASE_DIR=$BASE_DIR
+
+echo "Calculation completed"
