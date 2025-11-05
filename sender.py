@@ -83,7 +83,7 @@ def main():
         # Read the CSV to count unique sequences (like plot_metrics does)
         import pandas as pd
         try:
-            df_send = pd.read_csv(os.path.join("results", args.metrics))
+            df_send = pd.read_csv(args.metrics)
             
             # Count unique sequences per channel
             reliable_sent = df_send[df_send['channel'] == 0]['sequence'].nunique()

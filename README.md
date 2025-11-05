@@ -8,11 +8,17 @@ This repository contains our work for assignment 4, coded, directed, solved, by 
 - Python 3.10+
 - `pip install -r requirements.txt`
 
+- If running scripts:
+  - `python -m venv venv`
+  - `cd scripts`
+  - `chmod +x <script_name>`
+  - `./<script_name>`
 
 ## Run (after implementation)
 - Receiver: `python receiver.py --bind 127.0.0.1 --port 50000`
 - Sender: `python sender.py --server 127.0.0.1 --port 50000 --pps 30 --duration 30`
 - Metrics Summary: `python plot_metrics.py`
+- Experiment Pipelines: `./{ delay | jitter | loss }.sh`
 
 
 ## Files to Implement
