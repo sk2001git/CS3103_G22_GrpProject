@@ -142,8 +142,7 @@ class SRSender:
         """Adds a packet to the pacing queue. Retransmissions get priority."""
         with self._lock:
             if is_retransmission:
-                # Retransmitted packets jump to the front of the line
-                self._pacing_queue.appendleft((seq, payload))
+                self.on_send_raw(seq, payload)
             else:
                 self._pacing_queue.append((seq, payload))
 
@@ -281,7 +280,13 @@ class SRSender:
 
     def _backoff_rto(self) -> None:
         rto_before = self._rto
-        self._rto = min(self._rto * 2.0, self._max_rto)
+        # Only backoff to 2x the smoothed RTT
+        if self._avg_rtt is not None:
+            max_allowed_rto = max(self._min_rto, self._avg_rtt * 3.0)
+        else:
+            max_allowed_rto = self._max_rto
+        
+        self._rto = min(self._rto * 1.5, max_allowed_rto) 
         print(f"[SENDER]    RTO backoff: {rto_before:.1f}ms -> {self._rto:.1f}ms")
 
     def _timer_loop(self) -> None:
@@ -315,7 +320,7 @@ class SRSender:
                 if to_resend:
                     # Apply the less punishing congestion response
                     self._ssthresh = max(10.0, self._cwnd / 2.0)
-                    self._cwnd = self._INITIAL_CWND
+                    self._cwnd = max(self._ssthresh, 4.0) 
                     print(f"[SENDER]    Congestion event (Timeout): CWND reduced to {self._cwnd:.1f}")
                     self._backoff_rto()
             
