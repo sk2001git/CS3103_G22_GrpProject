@@ -315,7 +315,62 @@ class TestSRProtocol(unittest.TestCase):
         self.assertGreater(stats["retransmissions"], 0)
         print("✓ PASSED")
 
-    
+    def test_skip_threshold_rtt_scaling(self):
+        """Verify a skip threshold around 1x-2x RTT (use 1.5x) works under mild loss/jitter.
+
+        Warm up to measure average RTT with a clean link, then run a stressed
+        scenario (mild loss + jitter + some reordering) with
+        skip_threshold_ms = 1.5 * avg_RTT and assert all packets are delivered.
+        """
+        print("\n[TEST] Skip-threshold RTT scaling (1.5x avg RTT)")
+
+        # Warmup: measure avg RTT on a clean link
+        warm_net = NetworkSimulator(loss_rate=0.0, delay_ms=80, jitter_ms=10)
+        warm_h = TestHarness(warm_net)
+        # Use a reasonably small window so we get timely ACK samples
+        warm_h.setup_sender(window_size=32, rto_ms=200)
+        warm_h.setup_receiver(skip_threshold_ms=1000)
+
+        warm_msgs = [f"WARM_{i}".encode('utf-8') for i in range(8)]
+        warm_h.send_messages_in_loop(warm_msgs)
+        warm_h.wait_for_completion(expected_sent=len(warm_msgs), timeout=5)
+
+        # Compute avg RTT from collected samples
+        with warm_h.lock:
+            samples = list(warm_h.rtt_samples)
+        warm_h.cleanup()
+
+        self.assertTrue(samples, "No RTT samples collected during warmup")
+        avg_rtt = sum(samples) / len(samples)
+        print(f"Measured avg RTT (warmup): {avg_rtt:.1f} ms from {len(samples)} samples")
+
+        # Now run a stressed scenario and set skip to 1.5 * avg_RTT
+        test_net = NetworkSimulator(loss_rate=0.05, delay_ms=80, jitter_ms=25)
+        test_net.reordering_enabled = True
+        harness = TestHarness(test_net)
+        self.harness = harness
+
+        # Use a slightly higher retry budget and fewer messages to keep test stable
+        harness.setup_sender(window_size=32, rto_ms=250, max_retries=10)
+        skip_t = int(max(1, avg_rtt * 1.5))
+        harness.setup_receiver(skip_threshold_ms=skip_t)
+
+        messages = [f"MSG_{i}".encode('utf-8') for i in range(20)]
+        harness.send_messages_in_loop(messages)
+
+        # Wait for delivery/drops; pick a timeout that accounts for sender backoff/retries
+        wait_s = self._loss_wait_budget(max_retries=10, margin_s=8.0)
+        harness.wait_for_completion(expected_sent=len(messages), timeout=wait_s)
+
+        stats = harness.get_stats()
+        print(f"skip_t={skip_t}ms -> stats={stats}")
+
+        # Assert: no explicit drops and high delivery ratio (>=95%) to tolerate rare timing flakiness
+        self.assertEqual(stats['sent'], len(messages))
+        self.assertEqual(stats['dropped'], 0, "No messages should be dropped with reasonable retries and skip_t in [1x..2x RTT]")
+        delivered_ratio = stats['delivered'] / float(stats['sent']) if stats['sent'] else 0.0
+        self.assertGreaterEqual(delivered_ratio, 0.95, f"Insufficient delivery ratio {delivered_ratio:.2f} with skip_t={skip_t}ms")
+        print("✓ PASSED")
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

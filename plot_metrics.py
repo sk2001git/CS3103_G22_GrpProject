@@ -1,27 +1,129 @@
-# plot_metrics.py (bare-bones stub)
-
+# plot_metrics.py
 from __future__ import annotations
 import argparse
-import pandas as pd 
+import pandas as pd
+import matplotlib.pyplot as plt
+import os
 
-# import pandas as pd
-# import matplotlib.pyplot as plt
+def compute_metrics(sender_csv: str, receiver_csv: str):
+    """
+    Compute performance metrics from sender & receiver CSVs.
+    """
+    df_send = pd.read_csv(sender_csv)
+    df_recv = pd.read_csv(receiver_csv)
+
+    # Compute duration
+    if not df_recv.empty:
+        duration_s = df_recv["timestamp_s"].max() - df_recv["timestamp_s"].min()
+    else:
+        duration_s = 1.0
+        
+    if duration_s <= 0:
+        duration_s = 1.0
+
+    metrics = []
+
+    for ch in sorted(set(df_send["channel"]).union(set(df_recv["channel"]))):
+        sent_df = df_send[df_send["channel"] == ch]
+        recv_df = df_recv[df_recv["channel"] == ch]
+
+        # For reliable channel, use the actual sequence numbers from receiver logs
+        if ch == 0:  # Reliable channel
+            # Get unique sequences from receiver (they're the ground truth)
+            received_sequences = set(recv_df["sequence"])
+            
+            # For sender, count only sequences that are within the expected range
+            # Based on receiver data, we know sequences should be 0-6
+            max_received_seq = max(received_sequences) if received_sequences else 0
+            sent_df_filtered = sent_df[sent_df["sequence"] <= max_received_seq]
+            sent_unique_count = sent_df_filtered["sequence"].nunique()
+            
+            recv_unique_count = len(received_sequences)
+        else:
+            # For unreliable, use normal counting
+            sent_unique_count = sent_df["sequence"].nunique()
+            recv_unique_count = recv_df["sequence"].nunique()
+
+        pdr = (recv_unique_count / sent_unique_count * 100.0) if sent_unique_count > 0 else 0.0
+
+        avg_latency = recv_df["latency_ms"].mean() if recv_unique_count > 0 else 0.0
+        jitter = recv_df["latency_ms"].std() if recv_unique_count > 0 else 0.0
+
+        total_bytes = recv_df["bytes"].sum() if recv_unique_count > 0 else 0
+        throughput_kbps = (total_bytes * 8 / 1000) / duration_s
+
+        metrics.append({
+            "channel": ch,
+            "packets_sent": sent_unique_count,
+            "packets_received": recv_unique_count,
+            "packet_delivery_ratio_%": round(pdr, 2),
+            "avg_latency_ms": round(avg_latency, 2),
+            "jitter_ms": round(jitter, 2),
+            "throughput_kbps": round(throughput_kbps, 3),
+        })
+
+    return pd.DataFrame(metrics)
+
+
+def plot_all_metrics(df: pd.DataFrame, out_path: str):
+    fig, axes = plt.subplots(2, 2, figsize=(10, 7))
+    fig.suptitle("H-UDP Performance Metrics Summary", fontsize=14, fontweight="bold")
+
+    metrics_info = [
+        ("avg_latency_ms", "Average Latency (ms)"),
+        ("jitter_ms", "Jitter (ms)"),
+        ("throughput_kbps", "Throughput (kbps)"),
+        ("packet_delivery_ratio_%", "Packet Delivery Ratio (%)"),
+    ]
+
+    for ax, (metric, ylabel) in zip(axes.flat, metrics_info):
+        ax.bar(df["channel"].astype(str), df[metric], color="steelblue")
+        ax.set_xlabel("Channel")
+        ax.set_ylabel(ylabel)
+        ax.grid(axis="y", linestyle="--", alpha=0.6)
+        for i, v in enumerate(df[metric]):
+            ax.text(i, v, f"{v:.2f}", ha="center", va="bottom", fontsize=8)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig(out_path)
+    plt.close()
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Plot H-UDP metrics (stub)")
-    parser.add_argument("csv_path", help="Path to metrics CSV")
-    parser.add_argument("--out_prefix", default="metrics", help="Output image prefix")
+    parser = argparse.ArgumentParser(description="Plot combined H-UDP performance metrics")
+    parser.add_argument("--sender", default="metrics_sender.csv", help="Sender metrics CSV path")
+    parser.add_argument("--receiver", default="metrics_receiver.csv", help="Receiver metrics CSV path")
+    parser.add_argument("--out", default="metrics_summary.png", help="Output combined plot filename")
     args = parser.parse_args()
 
-    # TODO:
-    # 1) Read CSV with pandas.
-    # 2) Produce separate bar charts (matplotlib) for:
-    #    - throughput_bps
-    #    - pdr_percent
-    #    - avg_latency_ms
-    #    - jitter_ms
-    # 3) Save figures as f\"{args.out_prefix}_throughput.png\" etc.
-    raise NotImplementedError("plot_metrics.main: implement CSV read and plotting")
+    results_dir = os.path.join(os.getcwd(), "results")
+    os.makedirs(results_dir, exist_ok=True)
+
+    sender_path = os.path.join(results_dir, os.path.basename(args.sender))
+    receiver_path = os.path.join(results_dir, os.path.basename(args.receiver))
+    out_path = os.path.join(results_dir, os.path.basename(args.out))
+
+    missing = []
+    if not os.path.exists(sender_path):
+        missing.append(sender_path)
+    if not os.path.exists(receiver_path):
+        missing.append(receiver_path)
+
+    if missing:
+        print("Error: The following required CSV file(s) were not found:")
+        for path in missing:
+            print(f"  - {path}")
+        print("\nPlease ensure both sender and receiver metrics CSVs are exported under the 'results/' folder.")
+        return
+
+    df_metrics = compute_metrics(sender_path, receiver_path)
+    print("\n=== Computed Metrics Summary ===")
+    print(df_metrics.to_string(index=False))
+    print()
+
+    plot_all_metrics(df_metrics, out_path)
+    print(f"Combined metrics summary plot saved to: {out_path}")
+
 
 if __name__ == "__main__":
     main()

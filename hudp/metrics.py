@@ -1,16 +1,18 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+import os
 from typing import List, Dict, Optional
 import csv
 import time
 from collections import defaultdict
-from .packet import now_ms
+from .packet import now_ms, RELIABLE, UNRELIABLE
 
 RFC3550_CLOCK_HZ = 8000
 
 @dataclass
 class MetricsRecorder:
-    def __init__(self):
+    def __init__(self, role: str = "unknown"):
+        self.role = role
         self.records = []
         self.start_time = time.monotonic()
         self.channel_stats = defaultdict(lambda: {
@@ -24,18 +26,25 @@ class MetricsRecorder:
             'jitter': 0.0
         })
 
-    def on_sent(self, channel, num_bytes: int) -> None:
+    def on_sent(self, channel, sequence: int, num_bytes: int) -> None:
         """Record a single packet sent on this channel."""
+        if num_bytes is None:
+            num_bytes = 0
         stats = self.channel_stats[channel]
         stats['sent_count'] += 1
         stats['total_bytes_sent'] += num_bytes
 
-    def on_recv(self, channel: int, num_bytes: int, one_way_ms: Optional[float], header_ts_ms: int) -> None:
+        self.records.append({
+            'timestamp_s': time.monotonic() - self.start_time,
+            'channel': channel,
+            'sequence': sequence,  # Use actual sequence number
+            'bytes': num_bytes,    # Use actual byte count
+            'latency_ms': 0.0,
+        })
+
+    def on_recv(self, channel: int, sequence: int, num_bytes: int, header_ts_ms: int) -> None:
         """
         Record a single packet received on this channel.
-        If one_way_ms is provided, update latency samples and RFC3550-like jitter estimate:
-           J = J + (|D(i)-D(i-1)| - J) / 16
-        Jitter calculation based on RFC3550
         """
         arrival_time_ms = now_ms()
         one_way_latency = arrival_time_ms - header_ts_ms
@@ -54,49 +63,67 @@ class MetricsRecorder:
         self.records.append({
             'timestamp_s': time.monotonic() - self.start_time,
             'channel': channel,
-            'bytes': num_bytes,
+            'sequence': sequence,  # Use actual sequence number
+            'bytes': num_bytes,    # Use actual byte count
             'latency_ms': one_way_latency
         })
-    def pdr(self) -> float:
-        """Packet Delivery Ratio (received/sent * 100)."""
-        total_sent = sum(stats['sent_count'] for stats in self.channel_stats.values())
-        total_recv = sum(stats['recv_count'] for stats in self.channel_stats.values())
-        if total_sent == 0:
-            return 0.0
-        return (total_recv / total_sent) * 100.0
-
-    def throughput_bps(self, duration_s: float) -> float:
-        """Throughput in bits per second over duration_s, using bytes_recv."""
-        total_bytes_recv = sum(stats['total_bytes_recv'] for stats in self.channel_stats.values())
-        if duration_s == 0:
-            return 0.0
-        return (total_bytes_recv * 8) / duration_s
 
     def get_summary(self) -> dict:
         duration_s = time.monotonic() - self.start_time
         summary = {}
         for ch, stats in self.channel_stats.items():
-            sent = stats['sent_count']
-            recv = stats['recv_count']
+            # For sender, count unique sequences to avoid counting retransmissions
+            if self.role == "sender" and hasattr(self, '_sent_sequences'):
+                sent_count = len(self._sent_sequences.get(ch, set()))
+            else:
+                sent_count = stats['sent_count']
+                
+            recv_count = stats['recv_count']
 
-            pdr = (recv / sent * 100.0) if sent > 0 else 0
-            avg_latency = (stats['total_latency_ms'] / recv) if recv > 0 else 0
+            if self.role == "sender" and ch == 0:  # Reliable channel
+                pdr = round((recv_count / sent_count * 100.0), 2) if sent_count > 0 else 0.0
+            else:
+                pdr = "N/A"
+
+            avg_latency = (stats['total_latency_ms'] / recv_count) if recv_count > 0 else 0
             throughput_kbps = (stats['total_bytes_recv'] * 8 / duration_s / 1000) if duration_s > 0 else 0
 
             summary[ch] = {
-                'packets_sent': sent,
-                'packets_received': recv,
-                'packet_delivery_ratio_%': round(pdr, 2),
+                'packets_sent': sent_count,
+                'packets_received': recv_count,
+                'packet_delivery_ratio_%': pdr,
                 'avg_latency_ms': round(avg_latency, 2),
                 'jitter_ms': round(stats['jitter'], 2),
                 'throughput_kbps': round(throughput_kbps, 2)
             }
         return summary
 
+    def on_ack(self, channel: int, sequence: int, num_bytes: int = 0) -> None:
+        """Record that an ACK was received - only count unique ACKs"""
+        if channel == RELIABLE:
+            # Only count the first ACK for each sequence to avoid counting duplicates
+            if not hasattr(self, '_acked_sequences'):
+                self._acked_sequences = set()
+            
+            if sequence in self._acked_sequences:
+                return  # Skip duplicate ACKs
+                
+            self._acked_sequences.add(sequence)
+        
+        stats = self.channel_stats[channel]
+        stats['recv_count'] += 1
+        stats['total_bytes_recv'] += num_bytes
+
     def export_csv(self, filename: str):
         if not self.records:
             return
-        with open(filename, 'w', newline='') as f:
+        
+        os.makedirs("results", exist_ok=True)
+        filepath = os.path.join("results", filename)
+
+        with open(filepath, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=self.records[0].keys())
             writer.writeheader()
             writer.writerows(self.records)
+
+        print(f"Metrics data exported to {filepath}")

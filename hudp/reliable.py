@@ -74,6 +74,8 @@ class SRSender:
         self._srtt: Optional[float] = None
         self._rttvar: Optional[float] = None
         self._rto: float = float(rto_ms)
+        self._avg_rtt: Optional[float] = None
+        self._initial_rto = float(rto_ms)
         self._K = 4.0
         self._alpha = 1.0 / 8.0
         self._beta = 1.0 / 4.0
@@ -208,18 +210,21 @@ class SRSender:
         self._queue_packet_for_pacing(seq, serialized_payload, is_retransmission=False)
         return seq
 
-    def ack(self, ack_seq: int, peer_rwnd: int) -> None:
+    def ack(self, ack_seq: int, peer_rwnd: Optional[int] = None) -> None:
         # This method's logic doesn't change much, but the call to on_send_raw
         # at the end will now be correctly routed to the pacer queue.
         now = self.clock_ms()
         rtt_sample: Optional[int] = None
         fast_retransmit_item: Optional[_TxItem] = None
+        was_new_ack = False
         
         with self._lock:
-            self._peer_rwnd = float(peer_rwnd)
+            if peer_rwnd is not None:
+                self._peer_rwnd = float(peer_rwnd)
             item_was_in_flight = self._out.pop(ack_seq, None)
 
             if item_was_in_flight:
+                was_new_ack = True
                 self._cv.notify_all()
                 if item_was_in_flight.retries == 0:
                     rtt_sample = max(1, now - item_was_in_flight.first_send_ms)
@@ -235,6 +240,7 @@ class SRSender:
                 while self._base != self._next_seq and self._base not in self._out:
                     self._base = u16_incr(self._base, 1)
             else:
+                was_new_ack = False
                 self._dupacks += 1
                 print(f"[SENDER] <- ACK {ack_seq} (DUPLICATE). Count={self._dupacks}/{self._dupacks_threshold}. Base={self._base}")
 
@@ -258,20 +264,20 @@ class SRSender:
             self._queue_packet_for_pacing(
                 fast_retransmit_item.seq, fast_retransmit_item.payload, is_retransmission=True
             )
+        return was_new_ack
 
     def _update_rto(self, rtt_ms: int) -> None:
         rtt = float(rtt_ms)
-        if self._srtt is None:
-            self._srtt = rtt
+        if self._avg_rtt is None:
+            self._avg_rtt = rtt
             self._rttvar = rtt / 2.0
         else:
-            self._rttvar = (1 - self._beta) * self._rttvar + self._beta * abs(self._srtt - rtt)
-            self._srtt = (1 - self._alpha) * self._srtt + self._alpha * rtt
+            self._rttvar = (1 - self._beta) * self._rttvar + self._beta * abs(self._avg_rtt - rtt)
+            self._avg_rtt = (1 - self._alpha) * self._avg_rtt + self._alpha * rtt
 
-        self._rto = self._srtt + self._K * (self._rttvar if self._rttvar is not None else 0.0)
-        self._rto = max(self._min_rto, min(self._rto, self._max_rto))
-        # print(f"[SENDER] RTO updated. SRTT={self._srtt:.1f}ms, RTTVar={self._rttvar:.1f}ms -> New RTO={self._rto:.1f}ms")
-
+        candidate = max(self._initial_rto, 2.0 * self._avg_rtt)
+        self._rto = max(self._min_rto, min(candidate, self._max_rto))
+         # Keep SR RTT/RTTVAR machinery unchanged if present (no-op if not used)
 
     def _backoff_rto(self) -> None:
         rto_before = self._rto
@@ -387,7 +393,7 @@ class SRReceiver:
             if u16_in_window(seq, self._expected, self.window_size):
                 if seq == self._expected:
                     # --- Case A: IN-ORDER PACKET ---
-                    print(f"[RECEIVER] <- Data {seq} (IN-ORDER). Delivering.")
+                    print(f"[RECEIVER] <- Data {seq} (IN-ORDER). Delivering to app.")
                     deliver_list.append((seq, payload))
                     processed_successfully = True
                     self._expected = u16_incr(self._expected)
@@ -428,7 +434,7 @@ class SRReceiver:
             # Send ACK if we handled the packet
             if should_ack and processed_successfully:
                 available_window = self.max_buffer - len(self._buffer)
-                print(f"[RECEIVER] -> ACK for {seq}. (Available buffer: {available_window})")
+                print(f"[RECEIVER] -> Queued ACK {seq}. (Available buffer: {available_window})")
                 self.send_ack(seq, available_window)
 
         # --- Deliver Data outside the lock ---
@@ -470,3 +476,43 @@ class SRReceiver:
                     print(f"[RECEIVER] !! Error delivering packet {s} after skip: {e}")
 
             self._stop_evt.wait(tick_ms / 1000.0)
+
+    def _pacing_loop(self) -> None:
+        """
+        Runs in a dedicated thread, pulling packets from a queue and sending
+        them at a rate controlled by the congestion window and RTT.
+        Now also respects the remote advertised window: if peer_rwnd <= 0
+        the pacer will pause and requeue the packet.
+        """
+        while not self._stop_evt.is_set():
+            packet_to_send = None
+            with self._lock:
+                if self._pacing_queue:
+                    packet_to_send = self._pacing_queue.popleft()
+
+            if packet_to_send:
+                seq, payload = packet_to_send
+
+                # Respect peer advertised window; if it's zero, requeue and wait a bit.
+                with self._lock:
+                    effective_win = self._get_effective_window()
+                    if effective_win < 1:
+                        # Put it back at front to preserve priority and wait to be notified
+                        self._pacing_queue.appendleft((seq, payload))
+                        # Wait until either stop requested or a short timeout; ack() will notify on window changes
+                        # Use a short wait so shutdown remains responsive
+                        self._stop_evt.wait(0.05)
+                        continue
+
+                # Send the packet using the actual socket function
+                self.on_send_raw(seq, payload)
+
+                # Calculate the delay until the next packet can be sent
+                with self._lock:
+                    rtt_s = (self._srtt / 1000.0) if self._srtt is not None else (self._rto / 1000.0)
+                    cwnd = self._cwnd if self._cwnd >= 1.0 else 1.0
+
+                inter_packet_gap_s = rtt_s / cwnd
+                self._stop_evt.wait(inter_packet_gap_s)
+            else:
+                self._stop_evt.wait(0.001)

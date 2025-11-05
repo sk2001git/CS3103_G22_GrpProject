@@ -21,7 +21,13 @@ class GameNetAPI:
     - For reliable: integrate SRSender/SRReceiver, ACK wiring
     - Expose header timestamp to app for one-way latency measurements
     """
-    def __init__(self, bind_addr=('0.0.0.0', 0), skip_threshold_ms=200, on_drop: Optional[Callable[[int], None]] = None):
+    def __init__(
+        self,
+        bind_addr: Tuple[str, int] = ('0.0.0.0', 0),
+        # Default skip threshold to reflect ~1.5RTT links
+        skip_threshold_ms: int = 300,
+        on_drop: Optional[Callable[[int], None]] = None,
+        metrics=None):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(bind_addr)
         self.peer_addr = None
@@ -40,10 +46,20 @@ class GameNetAPI:
         self.emulator = None
         self.SKIP_THRESHOLD_MS = skip_threshold_ms
         self.on_drop = on_drop
+        self.metrics = metrics
+
+        # Initialize metrics with a dummy if none provided
+        if self.metrics is None:
+        # Create a dummy metrics object that has the required methods but does nothing
+            class DummyMetrics:
+                def on_sent(self, *args, **kwargs): pass
+                def on_recv(self, *args, **kwargs): pass
+                def on_ack(self, *args, **kwargs): pass
+            self.metrics = DummyMetrics()
 
         self._rx_ts = {}  # seq -> header.timestamp_ms for reliable delivery
         self.sr_sender = SRSender(
-            window_size=64,
+            window_size=32,
             rto_ms=200,
             max_retries=10,
             on_send_raw=self._sr_on_send_raw,  # wrap + send reliable
@@ -56,7 +72,7 @@ class GameNetAPI:
             send_ack=self._sr_send_ack,        # emit ACKs
             skip_threshold_ms=skip_threshold_ms,
             clock_ms=lambda: int(time.time() * 1000),
-            window_size=64,
+            window_size=32,
         )
 
     def start(self):
@@ -66,8 +82,14 @@ class GameNetAPI:
 
     def stop(self):
         self.running = False
+        try: self.notify_peer_shutdown()
+        except Exception: pass
+        # small grace period for peer to receive zero-window notification
+        time.sleep(0.1)
+        # close socket and join thread
         self.sr_sender.stop()
-        self.sock.close()
+        try: self.sock.close()
+        except Exception: pass
         self._recv_thread.join(timeout=1.0)
 
     def set_peer(self, addr):
@@ -86,14 +108,23 @@ class GameNetAPI:
             if seq is None:
                 # Window is full, packet was not sent
                 return None
+            
+            # Calculate actual bytes including header
+            total_bytes = HEADER_SIZE + len(payload)
+            if self.metrics:  # ADD THIS CHECK
+                self.metrics.on_sent(RELIABLE, seq, total_bytes)
             return seq
         else:
             # UNRELIABLE uses its own sequence numbers
             seq_num = self._send_seq_unreliable
             self._send_seq_unreliable += 1
             header = pack_header(UNRELIABLE, seq_num)
+            total_bytes = len(header) + len(payload)
+            if self.metrics:  # ADD THIS CHECK
+                self.metrics.on_sent(UNRELIABLE, seq_num, total_bytes)
             self._send_internal(header + payload)
             return seq_num
+
         
     def recv(self, block=True, timeout=None):
         start_time = time.time()
@@ -149,13 +180,23 @@ class GameNetAPI:
     def _handle_ack(self, data: bytes):
         """Handles an incoming ACK packet."""
         ack_seq, recv_window = unpack_ack(data) 
-        self.sr_sender.ack(ack_seq, recv_window)
+        was_new_ack = self.sr_sender.ack(ack_seq, recv_window)
+        
+        try:
+            if self.metrics and was_new_ack:  # Only record new ACKs, not duplicates
+                self.metrics.on_ack(RELIABLE, ack_seq, ACK_SIZE)
+        except Exception:
+            # Metrics updates must not crash packet processing
+            pass
 
     def _sr_on_send_raw(self, seq: int, payload: bytes) -> None:
         """Wrap reliable payload with your header and send."""
         if not self.peer_addr:
             return
         hdr = pack_header(RELIABLE, seq)
+        total_bytes = len(hdr) + len(payload)
+        if self.metrics:  # ADD THIS CHECK
+            self.metrics.on_sent(RELIABLE, seq, total_bytes)
         self._send_internal(hdr + payload)
 
     def _sr_send_ack(self, ack_seq: int, recv_window: int) -> None:
@@ -175,13 +216,28 @@ class GameNetAPI:
         if self.on_drop:
             self.on_drop(seq)
 
-
+    def notify_peer_shutdown(self, notify_count: int = 3, interval_ms: int = 50) -> None:
+        """Send a few zero-window ACKs to tell peer to stop sending."""
+        if not self.peer_addr:
+            return
+        try:
+            # Use last in-order seq (expected - 1) from the SRReceiver if available
+            ack_seq = 0
+            try:
+                ack_seq = (self.sr_receiver._expected - 1) & 0xFFFF
+            except Exception:
+                ack_seq = 0
+            ack_packet = pack_ack(ack_seq, 0)
+            for _ in range(notify_count):
+                self._send_internal(ack_packet)
+                time.sleep(interval_ms / 1000.0)
+        except Exception:
+            pass
 
     def _sr_on_rtt(self, seq: int, rtt_ms: int) -> None:
         # Hook for metrics if desired
         pass
-     
 
-
-
-   
+    def is_peer_shutdown(self) -> bool:
+        """Check if the peer has signaled shutdown (zero receive window)."""
+        return self.sr_sender._peer_rwnd == 0
