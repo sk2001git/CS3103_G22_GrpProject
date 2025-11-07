@@ -8,6 +8,7 @@ Key Features include:
 * A robust Selective Repeat (SR) protocol to efficiently handle and buffer out-of-order packets to minimise retransmission count.
 * A packet skip mechanism wheerby the receiver "skips" an expected reliable packet if it doesn't arrive after some time, preventing infinite-waiting of this missing packet.
 * A configurable simulation of real-world network conditions such as packet loss, latency, and jitter.
+* A receiver stop-signal that the sender automatically detects during active transmission, so that the sender shuts down gracefully.
 
 
 ## Getting Started
